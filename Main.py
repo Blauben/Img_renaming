@@ -20,70 +20,78 @@ def getFolder():
 
 def renameFiles(filenames):
     for filename in filenames:
-        evaluateRegexName(filename)
+        try:
+            formatedName = formatFilename(filename)
+            nameEpoch = formatNameToEpoch(formatedName)
+            metaName = filenameFromMetaDate(filename)
+            metaEpoch = formatNameToEpoch(metaName)
+            renameFile(filename, (formatedName, nameEpoch), (metaName, metaEpoch))
+        except RuntimeWarning as e:
+            print(e)
 
 
-def evaluateRegexName(filename):
-    if re.match(r"\d{8}_\d{4}\d*\..+", filename) or re.match(r"\d{8}_WA\d+\..+", filename):  # accepted filenames
-        renameFile(filename, filename, metaCheck=True)  # check for new metaData
+def formatNameToEpoch(filename):
+    assert re.match(r"\d{8}_\d{6}\d*\..+$", filename)
+    return int(datetime.strptime(filename.split(".")[0][:15], "%Y%m%d_%H%M%S").timestamp())  # TODO: continue here
+
+
+def formatFilename(filename):
+    if re.match(r"\d{8}_\d{4}\d*\..+", filename):  # accepted filenames
+        return filename
+    elif re.match(r"\d{8}_WA\d+\..+", filename):
+        regex = re.search(r"(\d{8})_WA\d+(\..+)", filename)
+        return f"{regex.group(1)}_000000{regex.group(2)}"
     elif re.match(r".*?\d{8}.\d{4}\d+.*(\..+)$", filename):  # searches for date and time
         regex = re.search(r"(\d{8}).(\d{4}\d+).*(\..+)$", filename)
-        newfilename = f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
-        renameFile(filename, newfilename)
+        return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
     elif re.match(r".*?\d{8}.WA\d+.*\..+$", filename):  # searches for date and WA index
-        newfilename = filenameFromMetaDate(filename)
-        renameFile(filename, newfilename)
+        return filenameFromMetaDate(filename)
     elif re.match(r"signal-\d{4}-\d{2}-\d{2}-\d+.*\..+$", filename):  # signal files
         newfilename = filename.replace("-", "")
         regex = re.search(r"signal(\d{8})(\d+)(\..+)$", newfilename)
-        newfilename = f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
-        renameFile(filename, newfilename)
+        return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
     elif re.match(r"WhatsApp \w+ \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}.*\..+$", filename):  # whatsapp files
         newfilename = filename.replace("-", "")
         regex = re.search(r"WhatsApp \w+ (\d{8}) at (\d{2})\.(\d{2})\.(\d{2}).*(\..+)$", newfilename)
-        newfilename = f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}{regex.group(4)}{regex.group(5)}"
-        renameFile(filename, newfilename)
+        return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}{regex.group(4)}{regex.group(5)}"
     elif re.match(r"snapchat.*\..+$", filename.lower()):
-        newfilename = filenameFromMetaDate(filename)
-        renameFile(filename, newfilename)
+        return filenameFromMetaDate(filename)
     elif re.match(r"^\d+$", filename.split(".")[0]):
         unixstamp = filename.split(".")[0]
         unixstamp = int(unixstamp) / (pow(10, len(unixstamp) - 10) if len(unixstamp) > 10 else 1)
         newfilename = datetime.fromtimestamp(unixstamp).strftime('%Y%m%d_%H%M%S')
-        renameFile(filename, re.sub(r"\d+", newfilename, filename))
+        return re.sub(r"\d+", newfilename, filename)
     else:
         print(f"\033[91mNo rule found for:\033[0m {filename}")
+        raise ValueError
 
 
-def renameFile(old, new, metaCheck=True):  # also treats edge cases
-    if not re.match(r"\d{8}.*\.[a-zA-Z0-9_]+$", new):
-        print(f"\033[91m{new} is not a valid filename!")
+def renameFile(filename, nameData, metaData):  # also treats edge cases
+    if not re.match(r"\d{8}.*\.[a-zA-Z0-9_]+$", nameData[0]):
+        print(f"\033[91m{nameData[0]} is not a valid filename!")
         return
-    new = checkMetaDateFilename(old, new) if metaCheck else new
-    if old == new:
+    if not re.match(r"\d{8}.*\.[a-zA-Z0-9_]+$", metaData[0]):
+        print(f"\033[91m{nameData[0]} is not a valid filename!")
+        return
+
+    new = nameData if nameData[1] <= metaData[1] else metaData
+    currentMeta = os.stat(os.path.join(folder, filename))
+    if filename == new[0] and currentMeta.st_mtime == new[1] and currentMeta.st_atime == new[1]:
         return
     try:
-        os.rename(os.path.join(folder, old), os.path.join(folder, new))
+        os.rename(os.path.join(folder, filename), os.path.join(folder, new[0]))
+        os.utime(os.path.join(folder, new[0]), (new[1], new[1]))
     except FileExistsError:
-        time = int(re.search(r"(\d+)\..*?$", new).group(
-            1))  # gets the lastDigit of the new filename in front of the file extension
-        dataExtension = re.search(r".*(\..+)$", new).group(1)
-        new = re.sub(r"\d+(\..*?)$", f"{str(time + 1)}{dataExtension}", new)
-        renameFile(old, new, False)
+        dataExtension = re.search(r".*(\..+)$", new[0]).group(1)
+        new = (f"{datetime.fromtimestamp(new[1] + 1).strftime('%Y%m%d_%H%M%S')}.{dataExtension}", new[1] + 1)
+        renameFile(filename, new, new)
 
 
 def filenameFromMetaDate(filename):
     assert re.match(r".*\..+$", filename)
     dataExtension = re.search(r".*(\..+)$", filename).group(1)
     metadata = os.stat(os.path.join(folder, filename))
-    minTime = min(metadata.st_ctime, metadata.st_mtime, metadata.st_atime)
-    return strftime('%Y%m%d_%H%M%S', localtime(minTime)) + dataExtension
-
-
-def checkMetaDateFilename(file, otherFilename):  # function computes the filename from metadata, compares it to the
-    # alternative filename otherFilename and returns the more suitable one.
-    metaDateFilename = filenameFromMetaDate(file)
-    return metaDateFilename if metaDateFilename < otherFilename else otherFilename
+    return strftime('%Y%m%d_%H%M%S', localtime(metadata.st_birthtime)) + dataExtension
 
 
 if __name__ == '__main__':
