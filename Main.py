@@ -22,6 +22,8 @@ def renameFiles(filenames):
     for filename in filenames:
         try:
             formatedName = formatFilename(filename)
+            if formatedName is None:
+                continue
             nameEpoch = formatNameToEpoch(formatedName)
             metaName = filenameFromMetaDate(filename)
             metaEpoch = formatNameToEpoch(metaName)
@@ -32,38 +34,42 @@ def renameFiles(filenames):
 
 def formatNameToEpoch(filename):
     assert re.match(r"\d{8}_\d{6}\d*\..+$", filename)
-    return int(datetime.strptime(filename.split(".")[0][:15], "%Y%m%d_%H%M%S").timestamp())  # TODO: continue here
+    time = None
+    try:
+        time = datetime.strptime(filename.split(".")[0][:15], "%Y%m%d_%H%M%S").timestamp()
+    except ValueError:
+        time = datetime.strptime(filename.split(".")[0][:8], "%Y%m%d").timestamp()
+    return int(time)
 
 
 def formatFilename(filename):
-    if re.match(r"\d{8}_\d{4}\d*\..+", filename):  # accepted filenames
+    if re.match(r"\d{8}_\d{4}\d*\..+$", filename):  # accepted filenames
         return filename
     elif re.match(r"\d{8}_WA\d+\..+", filename):
-        regex = re.search(r"(\d{8})_WA\d+(\..+)", filename)
+        regex = re.search(r"(\d{8})_WA\d+(\..+)$", filename)
         return f"{regex.group(1)}_000000{regex.group(2)}"
-    elif re.match(r".*?\d{8}.\d{4}\d+.*(\..+)$", filename):  # searches for date and time
-        regex = re.search(r"(\d{8}).(\d{4}\d+).*(\..+)$", filename)
+    elif re.match(r".*?\d{8}.\d{4}\d+.*?(\..+)$", filename):  # searches for date and time
+        regex = re.search(r"(\d{8}).(\d{4}\d+).*?(\..+)$", filename)
         return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
-    elif re.match(r".*?\d{8}.WA\d+.*\..+$", filename):  # searches for date and WA index
+    elif re.match(r".*?\d{8}.WA\d+.*?\..+$", filename):  # searches for date and WA index
         return filenameFromMetaDate(filename)
-    elif re.match(r"signal-\d{4}-\d{2}-\d{2}-\d+.*\..+$", filename):  # signal files
+    elif re.match(r"signal-\d{4}-\d{2}-\d{2}-\d+.*?\..+$", filename):  # signal files
         newfilename = filename.replace("-", "")
         regex = re.search(r"signal(\d{8})(\d+)(\..+)$", newfilename)
         return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}"
-    elif re.match(r"WhatsApp \w+ \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}.*\..+$", filename):  # whatsapp files
+    elif re.match(r"WhatsApp \w+ \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}.*?\..+$", filename):  # whatsapp files
         newfilename = filename.replace("-", "")
-        regex = re.search(r"WhatsApp \w+ (\d{8}) at (\d{2})\.(\d{2})\.(\d{2}).*(\..+)$", newfilename)
+        regex = re.search(r"WhatsApp \w+ (\d{8}) at (\d{2})\.(\d{2})\.(\d{2}).*?(\..+)$", newfilename)
         return f"{regex.group(1)}_{regex.group(2)}{regex.group(3)}{regex.group(4)}{regex.group(5)}"
-    elif re.match(r"snapchat.*\..+$", filename.lower()):
+    elif re.match(r"snapchat.*?\..+$", filename.lower()):
         return filenameFromMetaDate(filename)
-    elif re.match(r"^\d+$", filename.split(".")[0]):
+    elif re.match(r"^\d+\.", filename.split(".")[0]):
         unixstamp = filename.split(".")[0]
         unixstamp = int(unixstamp) / (pow(10, len(unixstamp) - 10) if len(unixstamp) > 10 else 1)
         newfilename = datetime.fromtimestamp(unixstamp).strftime('%Y%m%d_%H%M%S')
         return re.sub(r"\d+", newfilename, filename)
     else:
         print(f"\033[91mNo rule found for:\033[0m {filename}")
-        raise ValueError
 
 
 def renameFile(filename, nameData, metaData):  # also treats edge cases
@@ -89,9 +95,14 @@ def renameFile(filename, nameData, metaData):  # also treats edge cases
 
 def filenameFromMetaDate(filename):
     assert re.match(r".*\..+$", filename)
-    dataExtension = re.search(r".*(\..+)$", filename).group(1)
+    dataExtension = re.search(r"^[^.]+?(\..+)$", filename).group(1)
     metadata = os.stat(os.path.join(folder, filename))
-    return strftime('%Y%m%d_%H%M%S', localtime(metadata.st_birthtime)) + dataExtension
+    creation_time = None
+    try:
+        creation_time = metadata.st_birthtime
+    except AttributeError:
+        creation_time = metadata.st_ctime
+    return strftime('%Y%m%d_%H%M%S', localtime(creation_time)) + dataExtension
 
 
 if __name__ == '__main__':
